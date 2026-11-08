@@ -38,6 +38,18 @@ execute_process(
   WORKING_DIRECTORY "@QTROOT@/bin"
 )
 
+# macdeployqt copies every Qt SQL driver. We don't use QtSql directly, and the
+# non-SQLite drivers link against client libs end users won't have (e.g. the
+# Qt installer's PostgreSQL driver links /Applications/Postgres.app/.../libpq).
+file(GLOB sql_drivers "${app}/Contents/PlugIns/sqldrivers/*.dylib")
+foreach(driver ${sql_drivers})
+  get_filename_component(driver_name "${driver}" NAME)
+  if(NOT driver_name MATCHES "^libqsqlite")
+    message(STATUS "Removing unused SQL driver ${driver_name}")
+    file(REMOVE "${driver}")
+  endif()
+endforeach()
+
 #
 # fix_install_names: Fix library paths for bundled dylibs/sos
 #
