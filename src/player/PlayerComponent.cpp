@@ -1323,7 +1323,12 @@ void PlayerComponent::updateSubtitleConfiguration()
 void PlayerComponent::setSubtitleConfiguration()
 {
   bool assScaleBorderAndShadow = SettingsComponent::Get().value(SETTINGS_SECTION_SUBTITLES, "ass_scale_border_and_shadow").toBool();
+  // Renamed from sub-ass-force-style in mpv 0.37 (client API 2.2)
+#if MPV_CLIENT_API_VERSION >= MPV_MAKE_VERSION(2, 2)
   m_mpv->setProperty( "sub-ass-style-overrides", assScaleBorderAndShadow ? "ScaledBorderAndShadow=yes" : "ScaledBorderAndShadow=no");
+#else
+  m_mpv->setProperty( "sub-ass-force-style", assScaleBorderAndShadow ? "ScaledBorderAndShadow=yes" : "ScaledBorderAndShadow=no");
+#endif
 
   QString assStyleOverride = SettingsComponent::Get().value(SETTINGS_SECTION_SUBTITLES, "ass_style_override").toString();
   if (!assStyleOverride.isEmpty())
@@ -1464,7 +1469,12 @@ void PlayerComponent::setVideoConfiguration()
 
 #ifndef TARGET_RPI
   double displayFps = DisplayComponent::Get().currentRefreshRate();
+  // Renamed from display-fps in mpv 0.37 (client API 2.2)
+#if MPV_CLIENT_API_VERSION >= MPV_MAKE_VERSION(2, 2)
   m_mpv->setProperty( "display-fps-override", displayFps);
+#else
+  m_mpv->setProperty( "display-fps", displayFps);
+#endif
 #endif
 
   setAudioDelay(m_playbackAudioDelay);

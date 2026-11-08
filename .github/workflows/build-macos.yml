@@ -7,19 +7,18 @@ on:
     branches:
       - master
 
+env:
+  # Prebuilt universal (arm64 + x86_64) libmpv, so we don't depend on Homebrew
+  # bottles (Homebrew no longer ships x86_64 ones).
+  LIBMPV_BUILD_VERSION: v0.7.3
+  LIBMPV_FLAVOR: macos-universal-video-full
+  # mpv version that libmpv build ships; headers must match
+  MPV_VERSION: v0.36.0
+
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            artifact: macos-arm64
-          # disable intel macOS runner since HomeBrew doesn't have any x86_64 prebuilt binaries anymore
-          # and we're hitting the timeout while building mpv
-          # - runner: macos-15-intel
-          #   artifact: macos-x86_64
-    runs-on: ${{ matrix.runner }}
+    # Builds a single universal binary that runs on both Apple Silicon and Intel
+    runs-on: macos-15
     steps:
     - uses: actions/checkout@v7
       with:
@@ -30,27 +29,57 @@ jobs:
         version: '6.11.3'
         arch: clang_64
         modules: 'qtwebengine qtwebchannel qtpositioning'
-    - name: Install dependencies
+    - name: Fetch prebuilt libmpv
       run: |
-        brew update
-        brew install mpv
+        DEPS="$GITHUB_WORKSPACE/deps"
+        mkdir -p "$DEPS/lib" "$DEPS/include/mpv"
+        NAME="libmpv-libs_${LIBMPV_BUILD_VERSION}_${LIBMPV_FLAVOR}"
+        curl -fsSL -o libmpv.tar.gz \
+          "https://github.com/media-kit/libmpv-darwin-build/releases/download/${LIBMPV_BUILD_VERSION}/${NAME}.tar.gz"
+        tar -xzf libmpv.tar.gz
+        mv "${NAME}"/*.dylib "$DEPS/lib/"
+        for h in client.h render.h render_gl.h stream_cb.h; do
+          curl -fsSL -o "$DEPS/include/mpv/$h" \
+            "https://raw.githubusercontent.com/mpv-player/mpv/${MPV_VERSION}/libmpv/$h"
+        done
+        lipo -info "$DEPS/lib/libmpv.dylib"
+        echo "DEPS=$DEPS" >> "$GITHUB_ENV"
     - name: Release build
       run: |
         cmake -B build -G Ninja \
           -DQTROOT=$QT_ROOT_DIR \
           -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR \
+          -DDEPENDENCY_ROOT=$DEPS \
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=build/output \
           -DCHECK_FOR_UPDATES=ON \
-          -DUSE_STATIC_MPVQT=ON
+          -DUSE_STATIC_MPVQT=ON \
+          -DENABLE_SDL2=OFF \
+          -DENABLE_CEC=OFF
         cmake --build build --target install
+    - name: Verify bundle
+      run: |
+        APP="./build/output/Jellyfin Desktop.app"
+        lipo -info "$APP/Contents/MacOS/"*
+        # Every Mach-O in the bundle must be universal and only link system
+        # libraries or libraries inside the bundle.
+        fail=0
+        while IFS= read -r f; do
+          file "$f" | grep -q 'Mach-O' || continue
+          archs=$(lipo -archs "$f" 2>/dev/null)
+          case "$archs" in *x86_64*arm64*|*arm64*x86_64*) ;; *) echo "NOT UNIVERSAL ($archs): $f"; fail=1;; esac
+          bad=$(otool -L "$f" | tail -n +2 | awk '{print $1}' \
+            | grep -vE '^(/System/|/usr/lib/|@executable_path/|@loader_path/|@rpath/Qt)' || true)
+          if [ -n "$bad" ]; then echo "UNBUNDLED DEP in $f:"; echo "$bad"; fail=1; fi
+        done < <(find "$APP/Contents" -type f \( -perm -u+x -o -name '*.dylib' \))
+        exit $fail
     - name: Sign and create dmg
       run: |
         codesign --force --deep -s - "./build/output/Jellyfin Desktop.app/"
         brew install create-dmg
         VERSION=$(cat VERSION)
-        ARCH=$(uname -m)
-        DMG_NAME="JellyfinDesktop-${VERSION}-${ARCH}.dmg"
+        DMG_NAME="JellyfinDesktop-${VERSION}-universal.dmg"
         create-dmg \
           --volname "Jellyfin Desktop v${VERSION}" \
           --no-internet-enable \
@@ -62,5 +91,5 @@ jobs:
     - name: Archive production artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ matrix.artifact }}
+        name: macos-universal
         path: ${{ github.workspace }}/JellyfinDesktop-*.dmg
