@@ -70,7 +70,8 @@ jobs:
           file "$f" | grep -q 'Mach-O' || continue
           archs=$(lipo -archs "$f" 2>/dev/null)
           case "$archs" in *x86_64*arm64*|*arm64*x86_64*) ;; *) echo "NOT UNIVERSAL ($archs): $f"; fail=1;; esac
-          bad=$(otool -L "$f" | tail -n +2 | awk '{print $1}' \
+          # Dependency lines are tab-indented; skip the per-arch header lines
+          bad=$(otool -L "$f" | grep $'^\t' | awk '{print $1}' \
             | grep -vE '^(/System/|/usr/lib/|@executable_path/|@loader_path/|@rpath/Qt)' || true)
           if [ -n "$bad" ]; then echo "UNBUNDLED DEP in $f:"; echo "$bad"; fail=1; fi
         done < <(find "$APP/Contents" -type f \( -perm -u+x -o -name '*.dylib' \))
