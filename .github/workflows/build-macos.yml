@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - master
+      - macos-universal-libmpv  # TEMP: test in fork, drop before PR
 
 env:
   # Prebuilt universal (arm64 + x86_64) libmpv, so we don't depend on Homebrew
